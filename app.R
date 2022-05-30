@@ -1,0 +1,227 @@
+library(ggplot2)
+library(shiny)
+library(tidyverse) 
+library(ggplot2)
+library(shinyBS)
+library(shinythemes)
+library(spData)
+library(rworldmap)
+library(countrycode)
+library(data.table)
+library(lubridate)
+library(tidyverse)
+library(tidyquant)
+library(magrittr) 
+library(dplyr)
+library(tsibble)
+library(tsibbledata)
+library(RColorBrewer)
+
+
+core_pce <- read_csv('PCE_adjusted.csv') 
+setnames(core_pce, "DPCCRV1Q225SBEA", "core_pce_pct_change")
+
+core_pce$DATE = yearquarter(core_pce$DATE)
+core_pce%<>% distinct(DATE, .keep_all = TRUE)
+
+tenyear_breakeven_inflation <- read.csv('10year_breakeven_inflation.csv')
+setnames(tenyear_breakeven_inflation, "T10YIE", "tenyear_breakeven_inflation")
+tenyear_breakeven_inflation$tenyear_breakeven_inflation=as.double(tenyear_breakeven_inflation$tenyear_breakeven_inflation)
+tenyear_breakeven_inflation$DATE = yearquarter(tenyear_breakeven_inflation$DATE)
+tenyear_breakeven_inflation%<>% distinct(DATE, .keep_all = TRUE); tenyear_breakeven_inflation
+
+
+unit_labor_costs <- read_csv('unit_labor.csv')
+setnames(unit_labor_costs, "PRS85006111", "unit_labor_costs_pct_change")
+
+unit_labor_costs$DATE = yearquarter(unit_labor_costs$DATE)
+unit_labor_costs %<>% distinct(DATE, .keep_all = TRUE)
+
+
+
+bond_yield <- read_csv('bond_yield.csv') 
+setnames(bond_yield, "DAAA", "bond_yield_rate")
+bond_yield$bond_yield_rate=as.double(bond_yield$bond_yield_rate)
+
+bond_yield$DATE = yearquarter(bond_yield$DATE)
+bond_yield %<>% distinct(DATE, .keep_all = TRUE)
+
+
+treasury_yield <- read_csv('10-2_treasury.csv')
+setnames(treasury_yield, "T10Y2Y", "treasury_yield_rate")
+treasury_yield$treasury_yield_rate=as.double(treasury_yield$treasury_yield_rate)
+
+
+treasury_yield$DATE = yearquarter(treasury_yield$DATE)
+treasury_yield %<>% distinct(DATE, .keep_all = TRUE)
+
+
+graph_df <- left_join(core_pce, tenyear_breakeven_inflation, by="DATE") 
+graph_df <- left_join(graph_df, unit_labor_costs, by="DATE") 
+graph_df <- left_join(graph_df, bond_yield , by="DATE") 
+graph_df <- left_join(graph_df , treasury_yield , by = "DATE") 
+
+graph_df
+
+data_tsibble <- as_tsibble(graph_df, index = DATE, key = c("core_pce_pct_change", "unit_labor_costs_pct_change", "bond_yield_rate", "treasury_yield_rate", "tenyear_breakeven_inflation"))
+
+data_tsibble$DATE=as.Date(data_tsibble$DATE)
+
+data_tsibble_final <- data_tsibble %>% pivot_longer(!DATE , names_to = "measurement" , values_to = "percent_change")
+
+palette = colorRampPalette(brewer.pal(n=7, name='Oranges'))(7)
+palette = c("white", palette)
+
+
+
+
+birth_rates_all <- read_csv("crude_birth_rates.csv") 
+colnames(birth_rates_all)[4] <- "birth_rates"
+setnames(birth_rates_all, "Entity", "country")
+setnames(birth_rates_all, "Code", "country_code")
+birth_rates_all %<>% drop_na() 
+birth_rates_all$country_code = countrycode(birth_rates_all$country , origin='country.name' , destination='iso3c') 
+
+
+birthrate_2022 <- read_csv("birthrate_2022.csv") 
+setnames(birthrate_2022, "birthRate", "birth_rates") 
+
+
+birthrate_2022$country_code=countrycode(birthrate_2022$country, origin='country.name' , destination = 'iso3c')
+
+
+
+birth_rates_all %>% filter(Year %in% 2020)
+
+sPDF <- joinCountryData2Map( birth_rates_all , joinCode = "ISO3" , nameJoinColumn = "country_code") 
+
+sPDF2 <- joinCountryData2Map( birthrate_2022 , joinCode = "ISO3" ,nameJoinColumn = "country_code")
+
+graph <- function(df) {
+  ggplot(df[!is.na(df$percent_change),]) + 
+    geom_line(aes(x=as.Date(DATE) , y= percent_change, group=measurement , color=measurement)) +
+    labs(y= "year to year percent change", x = "year") + ggtitle("Indicator percent change over time") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    geom_rect(data=graph_df[1,] , aes(xmin=as.Date("1990-01-07", "%Y-%m-%d"), xmax=as.Date("1992-01-07", "%Y-%m-%d"), ymin=-Inf, ymax=Inf),
+              color="grey20", alpha=.2, inherit.aes = FALSE) +
+    annotate("text", x = as.Date("1991-01-07", "%Y-%m-%d"), y = 10, label = "Iraq invades Kuwait", angle = 90) +
+    geom_rect(data=graph_df[1,] , aes(xmin=as.Date("1974-01-07", "%Y-%m-%d"), xmax=as.Date("1976-01-07", "%Y-%m-%d"), ymin=-Inf, ymax=Inf),
+              color="grey20", alpha=.2, inherit.aes = FALSE) + 
+    annotate("text", x = as.Date("1975-01-07", "%Y-%m-%d"), y = 10, label = "70s Energy crisis", angle = 90) +
+    geom_rect(data=graph_df[1,] , aes(xmin=as.Date("2007-01-07", "%Y-%m-%d"), xmax=as.Date("2010-01-07", "%Y-%m-%d"), ymin=-Inf, ymax=Inf),
+              color="grey20", alpha=.2, inherit.aes = FALSE) + 
+    annotate("text", x = as.Date("2008-01-07", "%Y-%m-%d"), y = 10, label = "Great recession" , angle=90) +
+    geom_rect(data=graph_df[1,] , aes(xmin=as.Date("2020-01-07", "%Y-%m-%d"), xmax=as.Date("2021-01-07", "%Y-%m-%d"), ymin=-Inf, ymax=Inf),
+              color="grey20", alpha=.2, inherit.aes = FALSE) + 
+    annotate("text", x = as.Date("2020-09-07", "%Y-%m-%d"), y = 10, label = "COVID 19" , angle=90) +
+    geom_rect(data=graph_df[1,] , aes(xmin=as.Date("2000-01-07", "%Y-%m-%d"), xmax=as.Date("2002-01-07", "%Y-%m-%d"), ymin=-Inf, ymax=Inf),
+              color="grey20", alpha=.2, inherit.aes = FALSE) + 
+    annotate("text", x = as.Date("2001-01-07", "%Y-%m-%d"), y = 10, label = "Dot com bubble+9/11" , angle=90) 
+  
+}
+
+worldmap <- function(current_data){
+  
+  new_data = joinCountryData2Map(current_data , joinCode = "ISO3" , nameJoinColumn = "country_code")
+  
+  mapPolys(new_data, nameColumnToPlot='birth_rates', mapRegion='world',
+           missingCountryCol='dark grey', 
+           mapTitle="Births per 1000 people by country",
+           colourPalette=palette,
+           addLegend=TRUE,
+           oceanCol='light blue') 
+  
+}
+
+
+paragraph1 <- "In early 2022, the public sentiment about uncontrollable inflation has caused the Federal Reserve to adopt a hawkish stance on inflation. But according to Tony Dwyer, the chief market strategist at Canaccord Genuity, perhaps there was some hope for natural tapering of inflation. Graphing core PCE against non-farm unit labor costs shows that the two are highly correlated and tend to end up in the same place. Past peaks and falls of unit labor costs are often followed by peaks and falls of inflation. The end of 2021 shows the unit labor costs dropping, which suggests that inflation was also due for a drop sometime in Spring 2022. The 10-year breakeven inflation, the expected inflation determined by the market, was also dropping in late 2021. "
+
+paragraph2 <- "Economists look at these highly correlated indicators and
+predict inflation will naturally decline - but then a war starts, oil prices go up, and since oil is an input for
+everything made in the world, that causes inflation to go even higher. Since oil is an input for everything,
+oil prices are heavily correlated with inflation. The oil crises of the 70s/80s caused high inflation and even
+worse, stagflation."
+
+paragraph3 <- "Even with higher interest rates in Spring 2022, cash is not outperforming inflation. Even though bonds selling off is theoretically bearish for blue chip stocks, people are still pouring their 
+money into stocks/growth because TINA(there is no alternative). Bonds have poor returns; the only natural buyer of bonds are pensions and central banks. Fiat is being attacked by 
+inflation and alternative currencies. Commodities are volatile and are generally a poor investment; the commodities market is mainly used by commodity producers as a hedge. But 
+money has to go somewhere, and since bonds/fiat/commodities are all unattractive to investors right now, growth is the only place to go."
+
+paragraph4 <- "Acute inflation is a pressing issue, as evident by the Federal Reserve's hawkish tone. However, this is mainly problematic in Western countries. China and Japan are engaging in expansionary policy, printing money and lowering interest rates to brace for the 
+impact of long-term secular deflation, which is most likely a bigger threat to society than our present inflation, which will most likely peak in 2022. This is due to two reasons: 
+Demographic decline and technology innovation, both of which are deflationary. "
+
+paragraph5 <- "Some argue the Fed has artificially kept inflation high with reckless money printing and keeping interest rates at 0% for a decade. However, the current situation is unique: 
+central banks are unable to handle our current inflation because it's a buyer's strike, not a seller's strike. The world is voluntarily choosing to sanction Russia's gas, so the 
+the Federal Reserve will not provide liquidity backstops to buy the margin calls of commodity traders. If anything, these sanctions will hurt the dollar by a)
+limiting the Federal Reserve's ability to generate artificial inflation via money printer and b) incentivizing other countries to alternative payments (crypto) or financial 
+systems(commodity-backed currencies)."
+
+
+
+measurement <- data_tsibble_final$measurement
+
+data <- birth_rates_all
+
+ui <- fluidPage(
+  theme = shinytheme("superhero"),
+  titlePanel("Inflation and Deflation in 2022 and beyond"),
+  
+  
+  fluidRow(
+    p(paragraph1),
+    p(paragraph2),
+    h5("(Core PCE is the Federal Reserve's measure of inflation.)"),
+    selectInput("indicator", "Indicator measured", measurement , selected = "core_pce_pct_change" , multiple = TRUE),
+    column(12, plotOutput("graph")),
+    p(paragraph3),
+    p(paragraph4),
+    p(paragraph5),
+    sliderInput("year", "Year", min=1950 , max=2020, value=2020 , sep = ""),
+    column(12, plotOutput("mPlot", height="560px", width="950px")),
+    uiOutput("tab")
+    
+    
+  )
+  
+  
+)
+
+
+server <- function(input, output) {
+  
+  
+  chosen_data <- reactive({
+    data_tsibble_final %>%
+      filter(measurement %in% input$indicator)
+  })
+  
+  year <- reactiveVal(2020)
+  
+  # current_data <- reactive({
+  #   current_data <- data %>%
+  #     filter(Year %in% input$year)
+  # })
+  
+  observeEvent(input$year, {
+    new_year <- input$year
+    year(new_year) 
+  })
+  
+  output$graph <- renderPlot({
+    graph(chosen_data())
+  })
+  
+  output$mPlot <- renderPlot({
+    new_data <- data %>%
+      filter(Year %in% input$year)
+    worldmap( new_data )
+  })
+  
+  url <- a("author", href="https://twitter.com/_georgeliu_")
+  output$tab <- renderUI({
+    tagList( url)
+  })
+}
+
+shinyApp(ui, server)
